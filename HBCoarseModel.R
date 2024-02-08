@@ -12,9 +12,12 @@ library(tmap)
 library(randomForest)
 library(caret)
 
+#hello
+
 pts <- vect("UplandWetlandGradient/data/derived_data/hbpts_hydrog_strata.gpkg")
 stack <- rast("UplandWetlandGradient/data/derived_data/hb_predictor_stack_30m.tif")
 stack_scale <- scale(stack)
+writeRaster(stack_scale, filename = "UplandWetlandGradient/data/derived_data/hb_predictor_stack_30mscale.tif")
 
 pts_extract <- pts |> terra::extract(x = stack_scale, bind = TRUE, xy = TRUE) |>
     drop_na() |> select(-dem1m) 
