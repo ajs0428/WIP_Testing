@@ -15,7 +15,7 @@ library(caret)
 #hello
 
 pts <- vect("UplandWetlandGradient/data/derived_data/hbpts_hydrog_strata.gpkg")
-stack_scale <- rast("UplandWetlandGradient/data/derived_data/hb_predictor_stack_30mscale.tif",
+stack <- rast("UplandWetlandGradient/data/derived_data/hb_predictor_stack_30m.tif",
                     lyrs = c("dem", "slp_3", "slp_27", "slp_81", 
                              "meancurv_3", "prof_curv_3", "plan_curv_3",
                              "meancurv_27", "prof_curv_27", "plan_curv_27",
