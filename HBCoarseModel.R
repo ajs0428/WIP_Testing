@@ -22,7 +22,7 @@ stack <- rast("UplandWetlandGradient/data/derived_data/hb_predictor_stack_30m.ti
                              "meancurv_81", "prof_curv_81", "plan_curv_81",
                              "tpi_3", "tpi_27", "tpi_81"))
 
-pts_extract <- pts |> terra::extract(x = stack_scale, bind = TRUE, xy = TRUE) |>
+pts_extract <- pts |> terra::extract(x = stack, bind = TRUE, xy = TRUE) |>
     drop_na() |> select(-dem1m) 
 
 names(pts_extract) <- (c("class", "dem", "slp_3", "slp_27", "slp_81", 
