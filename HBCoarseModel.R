@@ -15,9 +15,12 @@ library(caret)
 #hello
 
 pts <- vect("UplandWetlandGradient/data/derived_data/hbpts_hydrog_strata.gpkg")
-stack <- rast("UplandWetlandGradient/data/derived_data/hb_predictor_stack_30m.tif")
-stack_scale <- scale(stack)
-writeRaster(stack_scale, filename = "UplandWetlandGradient/data/derived_data/hb_predictor_stack_30mscale.tif")
+stack_scale <- rast("UplandWetlandGradient/data/derived_data/hb_predictor_stack_30mscale.tif",
+                    lyrs = c("dem", "slp_3", "slp_27", "slp_81", 
+                             "meancurv_3", "prof_curv_3", "plan_curv_3",
+                             "meancurv_27", "prof_curv_27", "plan_curv_27",
+                             "meancurv_81", "prof_curv_81", "plan_curv_81",
+                             "tpi_3", "tpi_27", "tpi_81"))
 
 pts_extract <- pts |> terra::extract(x = stack_scale, bind = TRUE, xy = TRUE) |>
     drop_na() |> select(-dem1m) 
@@ -26,13 +29,11 @@ names(pts_extract) <- (c("class", "dem", "slp_3", "slp_27", "slp_81",
                            "meancurv_3", "prof_curv_3", "plan_curv_3",
                            "meancurv_27", "prof_curv_27", "plan_curv_27",
                            "meancurv_81", "prof_curv_81", "plan_curv_81",
-                           "tpi_3", "tpi_27", "tpi_81", 
-                           "hli_3", "hli_27", "hli_81",
-                           "hb_sca_log", "twi",
-                           "dev3", "dev27", "dev81",
+                           "tpi_3", "tpi_27", "tpi_81",
                            "x", "y"))
 
-pts_exdf <- as.data.frame(pts_extract) |> mutate(class = as.factor(class))
+pts_exdf <- as.data.frame(pts_extract) |> mutate(class = as.factor(class)) |> 
+    select(-c(x,y))
 
 # Validation Set 
 train.index <- as.vector(sample(c(1:nrow(pts_exdf)), 0.7*nrow(pts_exdf), replace=F))
@@ -41,19 +42,13 @@ train <- pts_exdf[train.index, c("class", "dem", "slp_3", "slp_27", "slp_81",
                                    "meancurv_3", "prof_curv_3", "plan_curv_3",
                                    "meancurv_27", "prof_curv_27", "plan_curv_27",
                                    "meancurv_81", "prof_curv_81", "plan_curv_81",
-                                   "tpi_3", "tpi_27", "tpi_81",
-                                   "hli_3", "hli_27", "hli_81",
-                                   "hb_sca_log", "twi", 
-                                   "dev3", "dev27", "dev81")]
+                                   "tpi_3", "tpi_27", "tpi_81")]
 
 test <- pts_exdf[-train.index, c("class", "dem", "slp_3", "slp_27", "slp_81", 
                                    "meancurv_3", "prof_curv_3", "plan_curv_3",
                                    "meancurv_27", "prof_curv_27", "plan_curv_27",
                                    "meancurv_81", "prof_curv_81", "plan_curv_81",
-                                   "tpi_3", "tpi_27", "tpi_81",
-                                   "hli_3", "hli_27", "hli_81",
-                                   "hb_sca_log", "twi", 
-                                   "dev3", "dev27", "dev81")]
+                                   "tpi_3", "tpi_27", "tpi_81")]
 
 set.seed(11)
 #wetwt <- ifelse(train$class == "WET", 3, 1)
