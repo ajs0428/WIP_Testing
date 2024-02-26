@@ -12,9 +12,10 @@ This notebook also saves the Random Forest Model as a .RData file that can be up
 
 Newly added: 
 
-`WA_Cluster.ipynb`: Iteratively subsetting spatial data by HUC across WA state
-`WA_Points_Cluster.ipynb`: Iteratively creating training datasets across WA state using HUC boundaries and NWI polygons
-`WA_WIP_HUC.ipynb`: Iteratively running random forest on WA HUC units using subsets of training data and raster stacks from full WA state
+- `WA_Cluster.ipynb`: Iteratively subsetting spatial data by HUC across WA state
+- `WA_Points_Cluster.ipynb`: Iteratively creating training datasets across WA state using HUC boundaries and NWI polygons
+- `WA_WIP_HUC.ipynb`: Iteratively running random forest on WA HUC units using subsets of training data and raster stacks from full WA state
+
 The last script, `WA_WIP_HUC.ipynb` has created a bunch of random forest models that I have saved in the `WIP Testing/data/huc_data/RF_Models` folder as `.RData` files. You can load these in the same script,` WA_WIP_HUC.ipynb`, and see an accuracy table for all the models. But it failed to run for all HUCs in WA state, so I will need to work on this. 
 
 This info is subject to change and is currently in development 
