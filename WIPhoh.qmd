@@ -1,0 +1,99 @@
+---
+title: "WIP-Hoh"
+format: html
+editor: visual
+---
+
+## Quarto doc for Hoh area
+
+Development of Base model for Hoh
+
+## Load the pkgs
+
+
+```{r}
+library(terra)
+library(sf)
+library(spatialEco)
+library(lidR)
+library(tidyterra)
+library(dplyr)
+library(whitebox)
+#library(MultiscaleDTM)
+library(lubridate)
+library(tmap)
+library(randomForest)
+library(caret)
+library(forcats)
+```
+
+# Load the training points 
+
+```{r}
+pts <- vect("~/Documents/Qgis/teal/Hoh_data/Training_and_Validation_Data/Hoh_labelled_sample_points_using NWI_prlimmodel_07182022.shp") %>% terra::project("EPSG:3740")
+```
+
+# Visualize the training sample
+
+```{r}
+plot(pts )
+pts
+```
+```{r}
+list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/TopoIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
+list_files
+
+# Load rasters and check extents
+for (file in list_files) {
+  r <- rast(file)
+  print(file)
+  print(ext(r))
+}
+terr_stack<- rast(list_files) %>% terra::project("EPSG:3740")
+```
+# Extract points from 
+
+```{r}
+pts_extract <- pts |> terra::extract(x = terr_stack, bind = TRUE, xy = TRUE) 
+```
+# Drop the unwanted columns 
+
+```{r}
+pts_exdf <- as.data.frame(pts_extract) |> mutate(class = as.factor(Class)) |> 
+    select(-c(x,y,Class,cell,H_NWI__,Comments,Ez_Access,Type,Moved,Analyst,FLAG,Analyst2,PrevClass,Field,Class_simp,Source,AJS_CLASS,HGM,MH_Class,MH_HGM,Uncertaint)) %>% filter(class %in% c('UPL','WET')) %>% arrange(class) %>%  droplevels() %>%  as.data.frame()
+
+levels(pts_exdf$class) 
+```
+
+# Split to train and test
+```{r}
+# Validation Set 
+train.index <- as.vector(sample(c(1:nrow(pts_exdf)), 0.7*nrow(pts_exdf), replace=F))
+
+train <- pts_exdf[train.index, ]
+
+test <- pts_exdf[-train.index, ]
+
+set.seed(11)
+```
+# Train the model 
+```{r}
+rf_model <- randomForest((class) ~ ., mtry = 12, 
+#sampsize = nrow(train[train$class == "WET",]),
+                         replace = TRUE, #weights = wetwt, 
+                         nodesize =1,
+                         ntree = 1000, na.action = na.omit,
+                         importance = TRUE, data = train)
+plot(rf_model)
+
+```
+
+
+# Validate on the holdout
+
+```{r}
+rf.test <- predict(rf_model, newdata = test, type = "response")
+caret::confusionMatrix(rf.test, test$class,positive='WET')
+vip::vip(rf_model, num_features = 15)
+
+```
