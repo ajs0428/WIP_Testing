@@ -1,0 +1,139 @@
+---
+title: "Hydro-variables"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+library(terra)
+library(sf)
+library(MultiscaleDTM)
+```
+
+originl crs - coord. ref. : NAD83 / UTM zone 10N (EPSG:26910)
+
+transform to 3740  - NAD83(HARN) / UTM zone 10N (EPSG:3740)
+
+```{r}
+finescaledem <- rast("~/Documents/Qgis/teal/Hoh_data/DEM_Input/Hoh_all_DTM_NAD83_4m_v2_clip.tif")  %>% terra::project("EPSG:3740")
+```
+
+Save it by compressing
+
+# Calculate Slope, at different negihbourhoods
+
+```{r}
+slope <- terrain(finescaledem, v = "slope", neighbors = 8)
+writeRaster(slope, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope.tif",  gdal=c("COMPRESS=LZW"))
+# Save or plot the result
+plot(slope, main = "Slope")
+```
+
+
+# Calculate Aspect, at different negihbourhoods
+
+```{r}
+aspect <- terrain(finescaledem, v = "aspect", neighbors = 8)
+writeRaster(aspect, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-aspect.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+# Save or plot the result
+plot(aspect, main = "Aspect")
+```
+
+# Calculate Profile curvature using Terra
+```{r}
+# Define Sobel filters for x and y direction gradients
+sobel_x <- matrix(c(-1, 0, 1, -2, 0, 2, -1, 0, 1), nrow = 3, byrow = TRUE)
+sobel_y <- matrix(c(-1, -2, -1, 0, 0, 0, 1, 2, 1), nrow = 3, byrow = TRUE)
+
+# Apply Sobel filters to compute gradients
+dx <- focal(finescaledem, w = sobel_x, fun = sum, na.rm = TRUE)
+dy <- focal(finescaledem, w = sobel_y, fun = sum, na.rm = TRUE)
+
+# Second derivatives by applying the Sobel filters to the first derivatives
+dxx <- focal(dx, w = sobel_x, fun = sum, na.rm = TRUE)
+dyy <- focal(dy, w = sobel_y, fun = sum, na.rm = TRUE)
+dxy <- focal(dx, w = sobel_y, fun = sum, na.rm = TRUE)
+
+# Calculate profile curvature
+profile_curvature <- (dxx * cos(aspect)^2) + (2 * dxy * sin(aspect) * cos(aspect)) + (dyy * sin(aspect)^2)
+
+plot(profile_curvature, main = paste("Profile Curvature (Window Size:", window_size, "x", window_size, ")"))
+```
+
+# Calculate TPI, at different negihbourhoods
+
+Most terrain indices are according to Wilson et al. (2007), as in gdaldem. TRI (Terrain Ruggedness Index) is the mean of the absolute differences between the value of a cell and its 8 surrounding cells.
+
+TPI (Topographic Position Index) is the difference between the value of a cell and the mean value of its 8 surrounding cells. Roughness is the difference between the maximum and the minimum value of a cell and its 8 surrounding cells.
+
+```{r}
+TPI <- focal(finescaledem, w=3, fun=\(x) x[5] - mean(x[-5]))
+writeRaster(TPI, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-TPI.tif",  gdal=c("COMPRESS=LZW"))
+# Save or plot the result
+plot(TPI, main = "TPI")
+```
+
+# Profile curvature using R
+
+```{r}
+# Set the window size (e.g., 3x3)
+window_size <- 3
+
+# Calculate profile curvature with a specified window size
+profile_curv <- Qfit(finescaledem, metrics = c("profc"), w = c(3, 3))
+writeRaster(profile_curv, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-profc.tif",  gdal=c("COMPRESS=LZW"))
+# Plot the result
+plot(profile_curv, main = paste("Profile Curvature (Window Size:", window_size, "x", window_size, ")"))
+```
+
+# Plan curvature using R
+
+```{r}
+# Set the window size (e.g., 3x3)
+window_size <- 3
+
+# Calculate plan curvature with a specified window size
+plan_curv <- Qfit(finescaledem, metrics = c("planc"), w = c(3, 3))
+writeRaster(plan_curv, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-planc.tif",  gdal=c("COMPRESS=LZW"))
+# Plot the result
+plot(plan_curv, main = paste("Plan Curvature (Window Size:", window_size, "x", window_size, ")"))
+```
+
+
+# Plan curvature using R
+
+	•	Low TWI Values (0 - 6):
+	•	Indicate areas that are likely to be drier.
+	•	Found on ridges, steep slopes, and areas with minimal water accumulation.
+	•	Associated with well-drained soils and lower soil moisture.
+	•	Moderate TWI Values (6 - 10):
+	•	Represent areas with moderate potential for water accumulation.
+	•	Typically found on gentle slopes or in transition zones between ridges and valleys.
+	•	These areas may have moderate soil moisture levels.
+	•	High TWI Values (10 and above):
+	•	Indicate areas likely to be wetter.
+	•	Found in valleys, depressions, or flat areas where water accumulates.
+	•	Associated with poorly drained soils, high soil moisture, and potential wetland areas.
+```{r}
+
+
+# Calculate the slope (in radians)
+slope <- terrain(finescaledem, "slope", unit = "radians")
+
+# Calculate the specific catchment area (SCA)
+sca <- terrain(finescaledem, "flowdir")
+
+# Calculate TWI
+twi <- log(sca / tan(slope))
+
+# Save or plot the result
+plot(twi, main = "Topographic Wetness Index (TWI)")
+```
