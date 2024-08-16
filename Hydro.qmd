@@ -16,6 +16,7 @@ When you click the **Render** button a document will be generated that includes 
 library(terra)
 library(sf)
 library(MultiscaleDTM)
+library(here)
 ```
 
 originl crs - coord. ref. : NAD83 / UTM zone 10N (EPSG:26910)
@@ -24,6 +25,7 @@ transform to 3740  - NAD83(HARN) / UTM zone 10N (EPSG:3740)
 
 ```{r}
 finescaledem <- rast("~/Documents/Qgis/teal/Hoh_data/DEM_Input/Hoh_all_DTM_NAD83_4m_v2_clip.tif")  %>% terra::project("EPSG:3740")
+writeRaster(finescaledem, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-3740crs.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
 ```
 
 Save it by compressing
@@ -32,7 +34,7 @@ Save it by compressing
 
 ```{r}
 slope <- terrain(finescaledem, v = "slope", neighbors = 8)
-writeRaster(slope, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope.tif",  gdal=c("COMPRESS=LZW"))
+writeRaster(slope, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
 # Save or plot the result
 plot(slope, main = "Slope")
 ```
@@ -76,12 +78,12 @@ TPI (Topographic Position Index) is the difference between the value of a cell a
 
 ```{r}
 TPI <- focal(finescaledem, w=3, fun=\(x) x[5] - mean(x[-5]))
-writeRaster(TPI, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-TPI.tif",  gdal=c("COMPRESS=LZW"))
+writeRaster(TPI, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-TPI.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
 # Save or plot the result
 plot(TPI, main = "TPI")
 ```
 
-# Profile curvature using R
+# Profile curvature using R Multiscale
 
 ```{r}
 # Set the window size (e.g., 3x3)
@@ -94,7 +96,7 @@ writeRaster(profile_curv, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-profc.
 plot(profile_curv, main = paste("Profile Curvature (Window Size:", window_size, "x", window_size, ")"))
 ```
 
-# Plan curvature using R
+# Plan curvature using R - Terra pkg
 
 ```{r}
 # Set the window size (e.g., 3x3)
@@ -109,7 +111,6 @@ plot(plan_curv, main = paste("Plan Curvature (Window Size:", window_size, "x", w
 
 
 # Plan curvature using R
-
 	•	Low TWI Values (0 - 6):
 	•	Indicate areas that are likely to be drier.
 	•	Found on ridges, steep slopes, and areas with minimal water accumulation.
@@ -122,18 +123,39 @@ plot(plan_curv, main = paste("Plan Curvature (Window Size:", window_size, "x", w
 	•	Indicate areas likely to be wetter.
 	•	Found in valleys, depressions, or flat areas where water accumulates.
 	•	Associated with poorly drained soils, high soil moisture, and potential wetland areas.
+	
+	
 ```{r}
-
+finescaledem <- rast("~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-3740crs.tif")
 
 # Calculate the slope (in radians)
 slope <- terrain(finescaledem, "slope", unit = "radians")
 
+#The flow direction codes are usually as follows:
+
+#	•	1: East
+#	•	2: Southeast
+
 # Calculate the specific catchment area (SCA)
-sca <- terrain(finescaledem, "flowdir")
+flowdir <- terrain(finescaledem, "flowdir")
+weight<- cellSize(finescaledem,transform=FALSE,unit="m")
+
+plot(flowdir)
+#The algorithm is an adaptation of the one proposed by Zhou at al, 2019.
+# Calculate flow accumulation (which is equivalent to Specific Catchment Area)
+flow_accumulation <- flowAccumulation(flowdir,weight)
+
+plot(flow_accumulation)
 
 # Calculate TWI
-twi <- log(sca / tan(slope))
+twi <- log(flow_accumulation / tan(slope))
 
 # Save or plot the result
 plot(twi, main = "Topographic Wetness Index (TWI)")
+```
+
+
+```{r}
+
+
 ```
