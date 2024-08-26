@@ -65,6 +65,8 @@ names(terr_stack) <- file_names
 # Extract points from 
 
 ```{r}
+terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+
 pts_extract <- pts |> terra::extract(x = terr_stack, bind = TRUE, xy = TRUE) 
 ```
 # Drop the unwanted columns 
@@ -110,7 +112,7 @@ vip::vip(rf_model, num_features = 15)
 ```
 
 
-# Predict on the Hoh
+# Predict on the Hoh, prediction takes longer for the entire Hoh
 
 ```{r}
 pred_wip <- predict(terr_stack, rf_model, fun = predict)
@@ -118,7 +120,7 @@ pred_wip <- predict(terr_stack, rf_model, fun = predict)
 writeRaster(pred_wip, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-predicted-wip.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
 
 # Plot the predicted raster
-#plot(predicted_raster, main = "Predicted Values")
+plot(pred_wip, main = "Predicted WIP")
 
 ```
 
@@ -136,7 +138,24 @@ smoothed_raster <- focal(pred_wip, w = matrix(1, nrow = window_size, ncol = wind
 # Save the smoothed raster
 writeRaster(smoothed_raster,  "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-predicted-wip-smoothed.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
 
+# Plot the predicted raster
+plot(smoothed_raster, main = "Predicted WIP- Smoothed")
 ```
+```{r}
+# Set up the plotting area to have 1 row and 2 columns
+par(mfrow = c(1, 2))
+
+# Plot the first raster with a color palette
+plot(pred_wip, main = "WIP", col = terrain.colors(10))
+
+# Plot the second raster with a color palette and custom zlim (for WIP Probability)
+#plot(smoothed_raster, main = "Raster 2", col = heat.colors(10), zlim = c(0, 100))
+plot(smoothed_raster, main = "WIP Smoothed", col = terrain.colors(10))
+
+# Reset the plotting layout to default
+par(mfrow = c(1, 1))
+```
+
 
 # check whether 
 
