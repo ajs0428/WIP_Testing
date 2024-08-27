@@ -57,7 +57,7 @@ for (file in list_files) {
 }
 terr_stack<- rast(list_files) %>% terra::project("EPSG:3740")
 
-writeRaster(terr_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+writeRaster(terr_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif",  gdal=c("COMPRESS=LZW","TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256"),overwrite=TRUE)
 #terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
 
 names(terr_stack) <- file_names
