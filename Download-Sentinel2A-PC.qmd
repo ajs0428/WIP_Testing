@@ -1,0 +1,119 @@
+---
+title: "Planetary Computer-Extraction of imagery from Sentinel 2A"
+format: html
+editor: visual
+---
+
+## Intro
+
+Code to download imagery from Sentinel library
+
+```{r}
+install.packages(c( "rstac", "httr"))
+```
+
+Load the libraries
+
+```{r}
+library(rstac)
+library(httr)
+library(terra)
+library(sf)
+```
+#if Using a polygon to define the area
+```{r}
+
+
+# Define your polygon (replace with your actual coordinates)
+polygon <- st_polygon(list(rbind(
+  c( -117.518959857052266, 51.949016802484465 ), c( -117.018699402528583, 51.936344382875433), c(-117.040648147817848, 51.627117197433037 ), c( -117.537761036587341, 51.639716923074346 ), c( -117.518959857052266, 51.949016802484465 )
+)))
+
+# Convert to an sf object
+polygon_sf <- st_sfc(polygon, crs = 4326)
+```
+
+
+#if using a geojson
+```{r}
+
+
+# Load a GeoJSON file
+geojson_file <- "./data/bbox_polygon_4326.geojson"
+geojson_sf <- st_read(geojson_file)
+
+# Inspect the data
+print(geojson_sf)
+summary(geojson_sf)
+
+# Plot the data
+plot(geojson_sf)
+```
+# Search it , the cloud filter is not possible now
+
+```{r}
+# Initialize STAC client for Planetary Computer
+stac_endpoint <- "https://planetarycomputer.microsoft.com/api/stac/v1"
+stac_client <- stac(stac_endpoint)
+
+# Set cloud cover filter (e.g., less than 10%)
+cloud_cover_filter <- list("eo:cloud_cover" = list("lte" = 10))
+
+# Search for Sentinel-2 data in the specified AOI and date range
+search_results <- stac_search(stac_client,
+                              collections = "sentinel-2-l2a",
+                              bbox = st_bbox(geojson_sf),
+                              datetime = "2024-07-01/2024-08-27") %>%
+  get_request() %>%
+  items_fetch() %>%
+  items_sign_planetary_computer()
+
+# Display search results
+print(search_results)
+```
+# find one clear image to calculate NDVI
+
+```{r}
+# Initialize a variable to store the desired item
+desired_item <- NULL
+
+# Iterate through the search results and find an item with cloud cover < 10%
+for (feature in search_results$features) {
+  cloud_cover <- feature$properties$`eo:cloud_cover`
+  
+  if (!is.null(cloud_cover) && cloud_cover < 10) {
+    desired_item <- feature
+    break
+  }
+}
+```
+
+# download, and calculate NDVI
+```{r}
+# Assuming you want to download the first result
+item <- desired_item
+asset_url <- item$assets$B04$href  # Example for Band 4 (Red)
+asset_url_NIR <- item$assets$B08$href  # Example for Band 4 (NIR)
+
+
+# Increase the timeout to 600 seconds (10 minutes)
+options(timeout = 600)
+# Download the image
+download.file(asset_url, destfile = "sentinel2_band4.tif", mode = "wb")
+download.file(asset_url_NIR, destfile = "sentinel2_nir_band.tif", mode = "wb")
+
+# Load the image into R
+red_band <- rast("sentinel2_band4.tif")
+nir_band <- rast("sentinel2_nir_band.tif")
+
+# Calculate NDVI: (NIR - Red) / (NIR + Red)
+ndvi <- (nir_band - red_band) / (nir_band + red_band)
+
+# Plot NDVI
+plot(ndvi, main = "NDVI")
+
+# Save the NDVI raster to a GeoTIFF file
+writeRaster(ndvi, "ndvi_eastern-WA.tif", gdal=c("COMPRESS=LZW"), overwrite = TRUE)
+
+
+```
