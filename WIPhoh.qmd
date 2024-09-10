@@ -1,0 +1,163 @@
+---
+title: "WIP-Hoh"
+format: html
+editor: visual
+---
+
+## Quarto doc for Hoh area
+
+Development of Base model for Hoh
+
+## Load the pkgs
+
+
+```{r}
+library(terra)
+library(sf)
+library(spatialEco)
+library(lidR)
+library(tidyterra)
+library(dplyr)
+#library(MultiscaleDTM)
+library(lubridate)
+library(tmap)
+library(randomForest)
+library(caret)
+library(forcats)
+```
+
+# Load the training points 
+
+```{r}
+pts <- vect("~/Documents/Qgis/teal/Hoh_data/Training_and_Validation_Data/Hoh_labelled_sample_points_using NWI_prlimmodel_07182022.shp") %>% terra::project("EPSG:3740")
+
+terra::gdal(lib="all")
+```
+
+# Visualize the training sample
+
+```{r}
+plot(pts )
+pts
+```
+```{r}
+list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/TopoIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
+list_files
+
+# Initialize an empty vector to store filenames
+file_names <- c()
+
+# Load rasters and check extents
+for (file in list_files) {
+  r <- rast(file)
+  print(file)
+  print(ext(r))
+  file_name <- tools::file_path_sans_ext(basename(file))
+  file_names <- append(file_names, file_name)
+}
+terr_stack<- rast(list_files) %>% terra::project("EPSG:3740")
+
+writeRaster(terr_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif",  gdal=c("COMPRESS=LZW","TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256"),overwrite=TRUE)
+#terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+
+names(terr_stack) <- file_names
+```
+# Extract points from 
+
+```{r}
+terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+
+pts_extract <- pts |> terra::extract(x = terr_stack, bind = TRUE, xy = TRUE) 
+```
+# Drop the unwanted columns 
+
+```{r}
+pts_exdf <- as.data.frame(pts_extract) |> mutate(class = as.factor(Class)) |> 
+    select(-c(x,y,Class,cell,H_NWI__,Comments,Ez_Access,Type,Moved,Analyst,FLAG,Analyst2,PrevClass,Field,Class_simp,Source,AJS_CLASS,HGM,MH_Class,MH_HGM,Uncertaint)) %>% filter(class %in% c('UPL','WET')) %>% arrange(class) %>%  droplevels() %>%  as.data.frame()
+
+levels(pts_exdf$class) 
+```
+
+# Split to train and test
+```{r}
+# Validation Set 
+train.index <- as.vector(sample(c(1:nrow(pts_exdf)), 0.7*nrow(pts_exdf), replace=F))
+
+train <- pts_exdf[train.index, ]
+
+test <- pts_exdf[-train.index, ]
+
+set.seed(11)
+```
+# Train the model 
+```{r}
+rf_model <- randomForest((class) ~ ., mtry = 12, 
+#sampsize = nrow(train[train$class == "WET",]),
+                         replace = TRUE, #weights = wetwt, 
+                         nodesize =1,
+                         ntree = 1000, na.action = na.omit,
+                         importance = TRUE, data = train)
+plot(rf_model)
+
+```
+
+
+# Validate on the holdout
+
+```{r}
+rf.test <- predict(rf_model, newdata = test, type = "response")
+caret::confusionMatrix(rf.test, test$class,positive='WET')
+vip::vip(rf_model, num_features = 15)
+
+```
+
+
+# Predict on the Hoh, prediction takes longer for the entire Hoh
+
+```{r}
+pred_wip <- predict(terr_stack, rf_model, fun = predict)
+# Save the predicted raster
+writeRaster(pred_wip, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-predicted-wip.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
+
+# Plot the predicted raster
+plot(pred_wip, main = "Predicted WIP")
+
+```
+
+#Apply a Focal Operation to Smooth the Raster
+
+#smoothing by applying a focal filter. The focal() function in terra
+
+```{r}
+# Define the size of the moving window (e.g., 3x3)
+window_size <- 3  # 3x3 window
+
+# Apply a mean filter
+smoothed_raster <- focal(pred_wip, w = matrix(1, nrow = window_size, ncol = window_size), fun = mean, na.rm = TRUE)
+
+# Save the smoothed raster
+writeRaster(smoothed_raster,  "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-predicted-wip-smoothed.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
+
+# Plot the predicted raster
+plot(smoothed_raster, main = "Predicted WIP- Smoothed")
+```
+```{r}
+# Set up the plotting area to have 1 row and 2 columns
+par(mfrow = c(1, 2))
+
+# Plot the first raster with a color palette
+plot(pred_wip, main = "WIP", col = terrain.colors(10))
+
+# Plot the second raster with a color palette and custom zlim (for WIP Probability)
+#plot(smoothed_raster, main = "Raster 2", col = heat.colors(10), zlim = c(0, 100))
+plot(smoothed_raster, main = "WIP Smoothed", col = terrain.colors(10))
+
+# Reset the plotting layout to default
+par(mfrow = c(1, 1))
+```
+
+
+# check whether 
+
+- Usually Larger windows  produce smoother outputs but may also blur significant features.
+- Edge effects ? when applying focal operations - as pixels near the borders of the raster may be less smooth due to fewer neighboring pixels.
