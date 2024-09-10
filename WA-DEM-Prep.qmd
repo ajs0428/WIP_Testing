@@ -1,0 +1,53 @@
+---
+title: "WA-DEM"
+format: html
+editor: visual
+---
+
+## Quarto
+
+
+
+## Running Code
+
+
+
+```{r}
+library(terra)
+```
+
+You can add options to executable code like this
+
+```{r}
+# Load the ASCII grid file
+ascii_raster <- rast("./data/psdem_2000/psdem.txt")
+
+# Load the projection from the .prj file
+prj_file <- "./data/psdem_2000/psdem.prj"
+crs_proj <- readLines(prj_file)
+
+# Assign the CRS to the raster
+#crs(ascii_raster) <- crs_proj
+
+# Save the raster as a GeoTIFF
+writeRaster(ascii_raster, "./data/psdem_2000/psdenwa.tif",  gdal=c("COMPRESS=LZW"), overwrite = TRUE)
+```
+
+# visualize
+```{r}
+  wa_raster <- rast("./data/psdem_2000/psdenwa.tif")
+wa_raster
+plot(wa_raster)
+```
+
+
+
+
+# eastern WA
+
+# visualize
+```{r}
+ewa<- rast("./data/utm11/zone11/w001001.adf")
+# Save the raster as a GeoTIFF
+writeRaster(ewa, "./data/ewa.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
+```
