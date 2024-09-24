@@ -1,0 +1,227 @@
+---
+title: "WIP-Prabability-Hoh 10m"
+format: html
+editor: visual
+---
+
+## Quarto doc for Hoh area -
+
+Development of Base model for Hoh
+
+## Load the pkgs
+
+```{r}
+library(terra)
+library(sf)
+library(spatialEco)
+library(lidR)
+library(tidyterra)
+library(dplyr)
+#library(MultiscaleDTM)
+library(lubridate)
+library(tmap)
+library(randomForest)
+library(caret)
+library(forcats)
+```
+
+# Load the training points
+
+```{r}
+pts <- vect("~/Documents/Qgis/teal/Hoh_data/Training_and_Validation_Data/Hoh_labelled_sample_points_using NWI_prlimmodel_07182022.shp") %>% terra::project("EPSG:3740")
+
+terra::gdal(lib="all")
+```
+
+# Visualize the training sample
+
+```{r}
+plot(pts )
+pts
+```
+
+# Use the below only if loading the individual rasters and stacking - Topo
+
+```{r}
+# list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/TopoIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
+# list_files
+# 
+# # Initialize an empty vector to store filenames
+# file_names <- c()
+# 
+# # Load rasters and check extents
+# for (file in list_files) {
+#   r <- rast(file)
+#   print(file)
+#   print(ext(r))
+#   file_name <- tools::file_path_sans_ext(basename(file))
+#   file_names <- append(file_names, file_name)
+# }
+# terr_stack<- rast(list_files) %>% terra::project("EPSG:3740")
+# 
+# writeRaster(terr_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+# #terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+# 
+# names(terr_stack) <- file_names
+```
+
+# Hydro
+
+# Use the below only if loading the individual rasters and stacking - Hydro
+
+#SpatExtent : 385487.33385947, 436919.33385947, 5270571.3625977, 5305423.3625977 (xmin, xmax, ymin, ymax)
+
+```{r}
+list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/HydroIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
+list_files
+
+# Initialize an empty vector to store filenames
+file_names <- c()
+
+# Load rasters and check extents
+for (file in list_files) {
+  r <- rast(file)
+  print(file)
+  print(ext(r))
+  file_name <- tools::file_path_sans_ext(basename(file))
+  file_names <- append(file_names, file_name)
+}
+hydro_stack<- rast(list_files[2:3]) %>% terra::project("EPSG:3740")
+
+writeRaster(hydro_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/HydroHoh-stacked.tif",   gdal=c("COMPRESS=LZW","TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256"),overwrite=TRUE)
+#terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+
+names(hydro_stack) <- file_names[2:3]
+```
+
+# get Spectral
+
+```{r}
+list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/VegIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
+list_files
+
+# Initialize an empty vector to store filenames
+file_names <- c()
+
+# Load rasters and check extents
+for (file in list_files) {
+  r <- rast(file)
+  print(file)
+  print(ext(r))
+  file_name <- tools::file_path_sans_ext(basename(file))
+  file_names <- append(file_names, file_name)
+}
+spectral_stack<- rast(list_files[7:9]) %>% terra::project("EPSG:3740")
+
+writeRaster(spectral_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/SpectralHoh-stacked.tif",   gdal=c("COMPRESS=LZW","TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256"),overwrite=TRUE)
+#terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+
+names(spectral_stack) <- file_names[7:9]
+```
+
+# Extract points from
+
+```{r}
+terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+hydro_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/HydroHoh-stacked.tif")
+spectral_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/SpectralHoh-stacked.tif")
+
+spectral_stack_prj <- terra::resample(spectral_stack,hydro_stack)
+all_stack <- c(terr_stack,hydro_stack,spectral_stack_prj)
+
+pts_extract <- pts |> terra::extract(x = all_stack, bind = TRUE, xy = TRUE) 
+```
+
+# Drop the unwanted columns
+
+```{r}
+pts_exdf <- as.data.frame(pts_extract) |> mutate(class = as.factor(Class)) |> 
+    select(-c(x,y,Class,cell,H_NWI__,Comments,Ez_Access,Type,Moved,Analyst,FLAG,Analyst2,PrevClass,Field,Class_simp,Source,AJS_CLASS,HGM,MH_Class,MH_HGM,Uncertaint)) %>% filter(class %in% c('UPL','WET')) %>% arrange(class) %>%  droplevels() %>%  as.data.frame()
+
+levels(pts_exdf$class) 
+```
+
+# Split to train and test
+
+```{r}
+# Validation Set 
+train.index <- as.vector(sample(c(1:nrow(pts_exdf)), 0.7*nrow(pts_exdf), replace=F))
+
+train <- pts_exdf[train.index, ]
+
+test <- pts_exdf[-train.index, ]
+
+set.seed(11)
+```
+
+# Train the model
+
+```{r}
+rf_model <- randomForest((class) ~ ., mtry = 12, 
+#sampsize = nrow(train[train$class == "WET",]),
+                         replace = TRUE, #weights = wetwt, 
+                         nodesize =1,
+                         ntree = 1000, na.action = na.omit,
+                         importance = TRUE, data = train)
+plot(rf_model)
+
+```
+
+# Validate on the holdout
+
+```{r}
+rf.test <- predict(rf_model, newdata = test, type = "prob")
+
+# Plot the predicted raster
+#plot(pred_wip_prob, main = "Predicted WIP-Probability")
+```
+
+# Predict on the Hoh, prediction takes longer for the entire Hoh
+
+```{r}
+pred_wip_topohydrospectral_prob <- predict(all_stack, rf_model, fun = predict, type = "prob")
+# Save the predicted raster
+writeRaster(pred_wip_topohydrospectral_prob, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHydroSpectralHoh-predicted-wip-prob.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
+
+# Plot the predicted raster
+plot(pred_wip_topohydrospectral_prob, main = "Predicted WIP-Hydro+Topo-Spectral-Probability")
+
+```
+
+#Apply a Focal Operation to Smooth the Raster
+
+#smoothing by applying a focal filter. The focal() function in terra
+
+```{r}
+# Define the size of the moving window (e.g., 3x3)
+window_size <- 3  # 3x3 window
+
+# Apply a mean filter
+smoothed_pred_wip_topohydrospectral_prob <- focal(pred_wip_topohydrospectral_prob, w = matrix(1, nrow = window_size, ncol = window_size), fun = mean, na.rm = TRUE)
+
+# Save the smoothed raster
+writeRaster(smoothed_pred_wip_topohydrospectral_prob,  "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHydroSpectralHoh-predicted-wip-smoothed-prbability.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
+
+# Plot the predicted raster
+plot(smoothed_pred_wip_topohydrospectral_prob, main = "Predicted WIP- Smoothed-Hydro+TopoSpectral")
+```
+
+```{r}
+# Set up the plotting area to have 1 row and 2 columns
+par(mfrow = c(1, 2))
+
+# Plot the first raster with a color palette
+plot(pred_wip_topohydrospectral_prob, main = "WIP - Hydro Topo Spectral", col = terrain.colors(10))
+
+# Plot the second raster with a color palette and custom zlim (for WIP Probability)
+#plot(smoothed_raster, main = "Raster 2", col = heat.colors(10), zlim = c(0, 100))
+plot(smoothed_pred_wip_topohydrospectral_prob, main = "WIP Smoothed - Hydro Topo Spectral", col = terrain.colors(10))
+
+# Reset the plotting layout to default
+par(mfrow = c(1, 1))
+```
+
+# check whether
+
+-   Usually Larger windows produce smoother outputs but may also blur significant features.
+-   Edge effects ? when applying focal operations - as pixels near the borders of the raster may be less smooth due to fewer neighboring pixels.
