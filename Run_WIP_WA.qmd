@@ -1,0 +1,281 @@
+---
+title: "WA_WIP"
+format: html
+editor: visual
+---
+
+## WA WIP
+
+## Load libraries
+
+```{r}
+library(terra)
+library(tidyterra)
+library(stringr)
+library(dplyr)
+library(randomForest)
+library(caret)
+library(ggplot2)
+library(lme4)
+set.seed(11)
+```
+
+Load all the HUCs -8
+
+```{r}
+wa_shp <- vect("data/wa_shp_diss.gpkg")
+wa_hucs <- vect("data/Hydrography/WA_HUC8.gpkg")
+wa_hucs$name
+```
+
+```{r}
+datapath <- paste0(getwd(), "/data/huc_data")
+datapath
+```
+
+```{r}
+list_rasts <- as.list(list.files(path = datapath, 
+                                 full.names = TRUE, 
+                                 pattern = "Skykomish",
+                                 include.dirs = FALSE))
+list_rasts
+
+list_pts <- as.list(list.files(path = paste0(datapath, "/points"), 
+                                 full.names = TRUE, 
+                                 pattern = "Skykomish",
+                                 include.dirs = FALSE))
+list_pts
+```
+
+
+
+```{r}
+terr_rast <- (list_rasts[grep('terr', (list_rasts))])[[1]]
+(terr_rast)
+
+deparse(substitute(terr_rast))
+```
+
+
+```{r}
+wip_rf_func <- function(hucs, path) {
+    for(i in 1:length(hucs)){
+        nameClean <- str_replace_all(paste0(values(hucs[i])), "[^[:alnum:]]", "")
+        rasts <- as.list(list.files(path = path, 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+    
+        pts <- as.list(list.files(path = paste0(path, "/points"), 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+      
+        training_pts <- vect(pts[[1]])
+        terr_rast <- rast((rasts[grep('terr', (rasts))])[[1]])
+        spec_rast <- rast((rasts[grep('spec', (rasts))])[[1]])
+        clim_rast <- rast((rasts[grep('clim', (rasts))])[[1]])
+        
+        pts_ext <-  training_pts |>
+                terra::extract(x = terr_rast, bind = T) |> 
+                terra::extract(x = spec_rast, bind = T) |> 
+                terra::extract(x = clim_rast, bind = T) |> 
+                as.data.frame() |> 
+                dplyr::mutate(class = as.factor(class)) |>
+                na.exclude() |>
+                write.csv(paste0(path, "/RF_Models/", 
+                                 nameClean, "rf_df", ".csv"))
+        
+        pts_ext <- read.csv(paste0(path, "/RF_Models/", 
+                                 nameClean, "rf_df", ".csv"),
+                            stringsAsFactors = T) |>
+                    select(-X)
+
+        train.index <- as.vector(sample(c(1:nrow(pts_ext)), 0.7*nrow(pts_ext), replace=F))
+        train <- pts_ext[train.index, ]
+        test <- pts_ext[-train.index, ]
+
+        rf_model <- randomForest(as.factor(class) ~ ., mtry = 10, 
+                         sampsize = nrow(train[train$class == "WET",]),
+                         replace = TRUE, #weights = wetwt, 
+                         nodesize =1,
+                         ntree = 1000, na.action = na.omit,
+                         importance = TRUE, data = train)
+        
+        test_predict <- predict(rf_model, newdata = test, type = "response") 
+        cm <- caret::confusionMatrix(test_predict, as.factor(test$class))
+        
+        cmtocsv <- data.frame(cbind(t(cm$overall),t(cm$byClass)))
+        write.csv(cmtocsv,file=paste0(path, "/RF_Models/",
+                                          nameClean, "rf_model_testCM", ".csv"))
+        
+        save(rf_model, file = paste0(path, "/RF_Models/",
+                                          nameClean, "rf_model", ".RData"))
+        
+        
+    }
+}
+```
+
+# Run for the entire WA state
+```{r}
+wip_rf_func(wa_hucs, datapath)
+```
+
+# Test a sample
+```{r}
+test <- get(load("data/huc_data/RF_Models/WillapaBayrf_model.RData"))
+test$importance
+```
+
+
+
+# Visualize the accuracy results for each model
+```{r}
+list_testacc <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
+                                 full.names = TRUE, 
+                                 pattern = "CM.csv",
+                                 include.dirs = FALSE))
+
+list_testacc
+empty <- list()
+for(i in 1:length(list_testacc)){
+    csv <- read.csv(list_testacc[[i]])
+    csv$X <- substr(list_testacc[[i]], 51, 60)
+    empty[[i]] <- csv
+}
+
+testacc <- bind_rows(empty)
+testacc
+```
+
+
+Now we can try to generate a prediction in one of the watersheds
+To do this we need a raster stack of the covariates in the same resolution and projection. Preferably in the resolution of the DEM used to make terrain metrics
+
+```{r}
+wa_hucs$name
+```
+
+
+```{r}
+wa_hucs$name[wa_hucs$name == "Hoh-Quillayute"]
+pred_rasts <- as.list(list.files(path = datapath, 
+                                     full.names = TRUE, 
+                                     #pattern = str_replace_all(paste0(values("Hoh")), "[^[:alnum:]]", ""),
+                                     pattern = gsub(" ", "", paste0("Hoh")),
+                                     include.dirs = FALSE))
+pred_rasts
+```
+
+
+```{r}
+pred_terr <- rast((pred_rasts[grep('terr', (pred_rasts))])[[1]])
+pred_spec <- rast((pred_rasts[grep('spec', (pred_rasts))])[[1]]) |> resample(pred_terr)
+pred_clim <- rast((pred_rasts[grep('clim', (pred_rasts))])[[1]]) |> resample(pred_terr)
+
+
+pred_terr
+pred_spec
+```
+
+
+```{r}
+pred_stack <- c(pred_terr, pred_spec, pred_clim)
+names(pred_stack)
+```
+
+
+```{r}
+list_models <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
+                                 full.names = TRUE, 
+                                 pattern = "HohQuillayuterf_model",
+                                 include.dirs = FALSE))
+#list_models
+read.csv(list_models[[1]])
+pred_model <- get(load(list_models[[2]]))
+vip::vip(pred_model, num_features = 15)
+
+```
+
+```{r}
+pred_wip <- predict(pred_stack, pred_model, type = "prob", 
+                    filename = "data/huc_data/WIPs/HohQuillayute_WIP.tif", 
+                    overwrite = TRUE)
+```     
+
+```{r}
+plot(pred_wip[[2]], ext = ext(vect("data/huc_data/points/HohQuillayute_pts.gpkg")))
+```  
+
+# Clip Hoh area
+
+```{r}
+hoh_cc <- vect("data/HOH_POLYGON_711.gpkg") |> terra::project("EPSG:3740")
+
+hoh_30m <- crop(pred_wip, hoh_cc, mask = TRUE)
+hoh_30m
+
+ggplot() + 
+    geom_spatraster(data = hoh_30m[[2]])
+```  
+#Putting together an iterative prediction mapping function
+
+```{r}
+wip_map_func <- function(hucs, path) {
+    for(i in 1:length(hucs)){
+        nameClean <- str_replace_all(paste0(values(hucs[i])), "[^[:alnum:]]", "")
+        rasts <- as.list(list.files(path = path, 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+    
+        pts <- as.list(list.files(path = paste0(path, "/points"), 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+        
+        mod <- get(load(as.list(list.files(path = paste0(path, "/RF_Models"), 
+                                     full.names = TRUE, 
+                                     pattern = paste0(nameClean, "rf_model.RData"),
+                                     include.dirs = FALSE))[[1]]))
+      
+        training_pts <- vect(pts[[1]])
+        terr_rast <- rast((rasts[grep('terr', (rasts))])[[1]])
+        spec_rast <- rast((rasts[grep('spec', (rasts))])[[1]]) |> resample(terr_rast)
+        clim_rast <- rast((rasts[grep('clim', (rasts))])[[1]]) |> resample(terr_rast)
+
+        pred_stack <- c(terr_rast, spec_rast, clim_rast)
+
+        pred_wip <- predict(pred_stack, mod, type = "prob", 
+                    filename = paste0(path, "/WIPs/", nameClean, "_WIP.tif"), 
+                    overwrite = TRUE)
+
+        }
+    }
+```         
+
+```{r}
+wip_map_func(wa_hucs, datapath)
+```         
+
+```{r}
+list_wips <- as.list(list.files(path = paste0(datapath, "/WIPs"), 
+                                 full.names = TRUE, 
+                                 pattern = "_WIP.tif",
+                                 include.dirs = FALSE))
+list_wips_r <- lapply(list_wips, rast)
+sprc_wips_r <- terra::sprc(list_wips_r)
+```  
+
+```{r}
+wa_wip <- terra::mosaic(sprc_wips_r, 
+                        fun = "mean", 
+                        filename = "data/WIP_Maps/WA_WIP.tif")
+                        
+```       
+
+```{r}
+r<- rast('./data/WIP_Maps/WA_WIP.tif')
+plot(r)
+```  
