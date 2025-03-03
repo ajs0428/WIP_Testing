@@ -4,7 +4,7 @@ format: html
 editor: visual
 ---
 
-## Quarto doc for Hoh area - 
+## Quarto doc for Hoh area -
 
 Development of Base model for Hoh
 
@@ -41,6 +41,7 @@ pts
 ```
 
 # Use the below only if loading the individual rasters and stacking - Topo
+
 ```{r}
 # list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/TopoIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
 # list_files
@@ -64,9 +65,12 @@ pts
 # names(terr_stack) <- file_names
 ```
 
-# Hydro 
+# Hydro
+
 # Use the below only if loading the individual rasters and stacking - Hydro
+
 #SpatExtent : 385487.33385947, 436919.33385947, 5270571.3625977, 5305423.3625977 (xmin, xmax, ymin, ymax)
+
 ```{r}
 list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/HydroIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
 list_files

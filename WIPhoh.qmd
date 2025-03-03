@@ -10,7 +10,6 @@ Development of Base model for Hoh
 
 ## Load the pkgs
 
-
 ```{r}
 library(terra)
 library(sf)
@@ -26,7 +25,7 @@ library(caret)
 library(forcats)
 ```
 
-# Load the training points 
+# Load the training points
 
 ```{r}
 pts <- vect("~/Documents/Qgis/teal/Hoh_data/Training_and_Validation_Data/Hoh_labelled_sample_points_using NWI_prlimmodel_07182022.shp") %>% terra::project("EPSG:3740")
@@ -40,6 +39,7 @@ terra::gdal(lib="all")
 plot(pts )
 pts
 ```
+
 ```{r}
 list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/TopoIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
 list_files
@@ -62,14 +62,40 @@ writeRaster(terr_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.
 
 names(terr_stack) <- file_names
 ```
-# Extract points from 
+
+# Extract points from
 
 ```{r}
 terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
 
 pts_extract <- pts |> terra::extract(x = terr_stack, bind = TRUE, xy = TRUE) 
 ```
-# Drop the unwanted columns 
+
+```{r}
+# Iterate through each layer in the stack
+for (i in 1:nlyr(terr_stack)) {
+  
+  # Get the layer name
+  layer_name <- names(terr_stack)[i]
+  
+  # Convert the layer to a data frame
+  layer_df <- as.data.frame(terr_stack[[i]], xy = TRUE)
+  
+  # Plot with ggplot2
+  layer_plot <- ggplot(layer_df, aes_string(x = "x", y = "y", fill = layer_name)) +
+    geom_tile() +
+    scale_fill_viridis_c() +  # Optional color scale
+    coord_equal() +
+    labs(title = layer_name, x = "Longitude", y = "Latitude", fill = layer_name) +
+    theme_minimal()
+  
+  # Save the plot as a PNG file with the layer name
+  ggsave(filename = paste0("./figs/fine/",layer_name, ".png"), plot = layer_plot, width = 10, height = 8)
+}
+
+```
+
+# Drop the unwanted columns
 
 ```{r}
 pts_exdf <- as.data.frame(pts_extract) |> mutate(class = as.factor(Class)) |> 
@@ -79,6 +105,7 @@ levels(pts_exdf$class)
 ```
 
 # Split to train and test
+
 ```{r}
 # Validation Set 
 train.index <- as.vector(sample(c(1:nrow(pts_exdf)), 0.7*nrow(pts_exdf), replace=F))
@@ -89,7 +116,9 @@ test <- pts_exdf[-train.index, ]
 
 set.seed(11)
 ```
-# Train the model 
+
+# Train the model
+
 ```{r}
 rf_model <- randomForest((class) ~ ., mtry = 12, 
 #sampsize = nrow(train[train$class == "WET",]),
@@ -101,7 +130,6 @@ plot(rf_model)
 
 ```
 
-
 # Validate on the holdout
 
 ```{r}
@@ -110,7 +138,6 @@ caret::confusionMatrix(rf.test, test$class,positive='WET')
 vip::vip(rf_model, num_features = 15)
 
 ```
-
 
 # Predict on the Hoh, prediction takes longer for the entire Hoh
 
@@ -141,6 +168,7 @@ writeRaster(smoothed_raster,  "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-pr
 # Plot the predicted raster
 plot(smoothed_raster, main = "Predicted WIP- Smoothed")
 ```
+
 ```{r}
 # Set up the plotting area to have 1 row and 2 columns
 par(mfrow = c(1, 2))
@@ -156,8 +184,7 @@ plot(smoothed_raster, main = "WIP Smoothed", col = terrain.colors(10))
 par(mfrow = c(1, 1))
 ```
 
+# check whether
 
-# check whether 
-
-- Usually Larger windows  produce smoother outputs but may also blur significant features.
-- Edge effects ? when applying focal operations - as pixels near the borders of the raster may be less smooth due to fewer neighboring pixels.
+-   Usually Larger windows produce smoother outputs but may also blur significant features.
+-   Edge effects ? when applying focal operations - as pixels near the borders of the raster may be less smooth due to fewer neighboring pixels.
