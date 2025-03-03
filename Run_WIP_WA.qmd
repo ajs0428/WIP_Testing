@@ -47,15 +47,12 @@ list_pts <- as.list(list.files(path = paste0(datapath, "/points"),
 list_pts
 ```
 
-
-
 ```{r}
 terr_rast <- (list_rasts[grep('terr', (list_rasts))])[[1]]
 (terr_rast)
 
 deparse(substitute(terr_rast))
 ```
-
 
 ```{r}
 wip_rf_func <- function(hucs, path) {
@@ -118,19 +115,20 @@ wip_rf_func <- function(hucs, path) {
 ```
 
 # Run for the entire WA state
+
 ```{r}
 wip_rf_func(wa_hucs, datapath)
 ```
 
 # Test a sample
+
 ```{r}
 test <- get(load("data/huc_data/RF_Models/WillapaBayrf_model.RData"))
 test$importance
 ```
 
-
-
 # Visualize the accuracy results for each model
+
 ```{r}
 list_testacc <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
                                  full.names = TRUE, 
@@ -149,14 +147,22 @@ testacc <- bind_rows(empty)
 testacc
 ```
 
+```{r}
+testacc %>% mutate(rid = row_number()) %>%
+  ggplot() + 
+  #geom_boxplot(aes(x=Accuracy)) +
+ geom_line(aes(rid,Accuracy,color='Acc'))  +
+ geom_line(aes(rid,F1,color='F1'))  +  
+   geom_line(aes(rid,Recall,color='Recall'))  +  
+   geom_line(aes(rid,Precision,color='Precision'))  +  
+  theme_minimal()
+```
 
-Now we can try to generate a prediction in one of the watersheds
-To do this we need a raster stack of the covariates in the same resolution and projection. Preferably in the resolution of the DEM used to make terrain metrics
+Now we can try to generate a prediction in one of the watersheds To do this we need a raster stack of the covariates in the same resolution and projection. Preferably in the resolution of the DEM used to make terrain metrics
 
 ```{r}
 wa_hucs$name
 ```
-
 
 ```{r}
 wa_hucs$name[wa_hucs$name == "Hoh-Quillayute"]
@@ -168,7 +174,6 @@ pred_rasts <- as.list(list.files(path = datapath,
 pred_rasts
 ```
 
-
 ```{r}
 pred_terr <- rast((pred_rasts[grep('terr', (pred_rasts))])[[1]])
 pred_spec <- rast((pred_rasts[grep('spec', (pred_rasts))])[[1]]) |> resample(pred_terr)
@@ -179,12 +184,10 @@ pred_terr
 pred_spec
 ```
 
-
 ```{r}
 pred_stack <- c(pred_terr, pred_spec, pred_clim)
 names(pred_stack)
 ```
-
 
 ```{r}
 list_models <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
@@ -199,14 +202,35 @@ vip::vip(pred_model, num_features = 15)
 ```
 
 ```{r}
+lm <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
+                                 full.names = TRUE, 
+                                 pattern = "RData",
+                                 include.dirs = FALSE))
+rb<- data.frame()
+
+for (model in lm)
+{
+   pm <- get(load(model))
+   dfimp <- pm$importance %>% as.data.frame()
+   rb <- rbind(rb,dfimp)
+}  
+```
+
+# Cumulative importance
+
+```{r}
+rb %>% summarise(mp = )
+```
+
+```{r}
 pred_wip <- predict(pred_stack, pred_model, type = "prob", 
                     filename = "data/huc_data/WIPs/HohQuillayute_WIP.tif", 
                     overwrite = TRUE)
-```     
+```
 
 ```{r}
 plot(pred_wip[[2]], ext = ext(vect("data/huc_data/points/HohQuillayute_pts.gpkg")))
-```  
+```
 
 # Clip Hoh area
 
@@ -218,7 +242,8 @@ hoh_30m
 
 ggplot() + 
     geom_spatraster(data = hoh_30m[[2]])
-```  
+```
+
 #Putting together an iterative prediction mapping function
 
 ```{r}
@@ -253,11 +278,11 @@ wip_map_func <- function(hucs, path) {
 
         }
     }
-```         
+```
 
 ```{r}
 wip_map_func(wa_hucs, datapath)
-```         
+```
 
 ```{r}
 list_wips <- as.list(list.files(path = paste0(datapath, "/WIPs"), 
@@ -266,16 +291,16 @@ list_wips <- as.list(list.files(path = paste0(datapath, "/WIPs"),
                                  include.dirs = FALSE))
 list_wips_r <- lapply(list_wips, rast)
 sprc_wips_r <- terra::sprc(list_wips_r)
-```  
+```
 
 ```{r}
 wa_wip <- terra::mosaic(sprc_wips_r, 
                         fun = "mean", 
                         filename = "data/WIP_Maps/WA_WIP.tif")
                         
-```       
+```
 
 ```{r}
 r<- rast('./data/WIP_Maps/WA_WIP.tif')
 plot(r)
-```  
+```

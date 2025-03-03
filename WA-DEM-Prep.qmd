@@ -6,11 +6,7 @@ editor: visual
 
 ## Quarto
 
-
-
 ## Running Code
-
-
 
 ```{r}
 library(terra)
@@ -34,18 +30,17 @@ writeRaster(ascii_raster, "./data/psdem_2000/psdenwa.tif",  gdal=c("COMPRESS=LZW
 ```
 
 # visualize
+
 ```{r}
   wa_raster <- rast("./data/psdem_2000/psdenwa.tif")
 wa_raster
 plot(wa_raster)
 ```
 
-
-
-
 # eastern WA
 
 # visualize
+
 ```{r}
 ewa<- rast("./data/utm11/zone11/w001001.adf")
 # Save the raster as a GeoTIFF
