@@ -1,0 +1,195 @@
+---
+title: "WA_DEMs 10m Stack - Derive and store terrain metrics"
+description: "At 10m -  generates terrain layers for Washington State"
+author: "Aji John"
+format: html
+editor: visual
+---
+
+## Overview
+
+This notebook provides a detailed guide for processing 10-meter resolution Digital Elevation Models (DEMs) for Washington State (WA) using R. Includes downloading, cropping, and generating terrain metrics such as slope, roughness, and Topographic Wetness Index (TWI) for HUC8 watersheds.
+
+#@@ Objectives
+
+Clip and process DEM data for HUC8 regions in WA.
+Calculate terrain attributes including slope, roughness, TWI, and curvature.
+Automate the processing of all HUC8 watersheds in the state.
+
+
+
+## Load packages
+
+```{r}
+library(terra)
+library(tidyterra)
+library(stringr)
+library(dplyr)
+library(randomForest)
+library(caret)
+library(ggplot2)
+library(lme4)
+set.seed(11)
+library(elevatr)  
+library(nhdplusTools)
+library(MultiscaleDTM)
+library(whitebox)
+```
+
+## Load Preprocessed data - primarily utility functions
+
+```{r}
+load('./fun.RData')
+```
+
+## Load and Prepare Shapefiles
+
+wa_shapes: Washington state boundary shapes.
+wa_huc8s: Hydrological Unit Code 8 (HUC8) watershed boundaries.
+
+```{r}
+wa_shapes <- vect("data/wa_shp_diss.gpkg")
+wa_huc8s <- vect("data/Hydrography/WA_HUC8.gpkg")
+wa_huc8s$name
+```
+
+## Data Processing Workflow
+
+- Prepare Boundary Data
+- Obtain HUC8 Boundaries
+
+```{r}
+library(sf)
+library(tigris) 
+# Get Washington state boundary
+wa_boundary <- states(cb = TRUE) %>% 
+  filter(STUSPS == "WA") %>% 
+  st_transform(crs = 4326)  # Ensure it's in WGS84 CRS
+
+# Get all HUC8 boundaries that intersect Washington State
+huc8_regions <- get_huc(AOI = wa_boundary, type = "huc08")
+```
+
+## Define File Paths
+
+Ajust as needed
+
+```{r}
+datapath <- paste0(getwd(), "/data/WA_10m")
+```
+
+## Define DEM Download Function - clip, calculate and save
+
+terr_stackXXX XXXX is the name of the basin
+
+Key tasks:
+
+-DEM Cropping and Masking: Crops DEM to the watershed boundary.
+-Terrain Metric Calculations: Slope, roughness, curvature, TWI.
+-WhiteboxTools Integration: Filling depressions, flow accumulation.
+-Saving Outputs: Exports combined rasters as GeoTIFF files.
+
+
+```{r}
+
+dem <- rast("./data/WA_10mDEM_3740.tif")
+
+# Function to download DEM for a single HUC8 region
+download_huc8_dem_name <- function(huc8_boundary, huc8_id,huc8_name, zoom_level = 11) {
+  tryCatch({
+    
+    #dem <- get_elev_raster(locations = huc8_boundary, z = 11, clip = "locations")
+    # Crop the DEM to the extent of the HUC8 boundary
+    # Define the target CRS (UTM Zone 10N, WGS 84)
+    target_crs <- "EPSG:3740"
+
+    # Reproject the polygon to the target CRS
+     huc8_boundary <- st_transform(huc8_boundary, crs = 3740)
+
+    dem_cropped <- crop(dem, huc8_boundary)
+    # Step 4: Mask the DEM to the exact shape of the HUC8 boundary
+    dem_cropped <- mask(dem_cropped, huc8_boundary)
+
+    # Step 2: Calculate slope in radians
+    slope <- terrain(dem_cropped,  "slope", unit = "radians")
+    roughness <- terrain(dem_cropped,  "roughness")
+    tpi <- terrain(dem_cropped,  "TPI")
+    vrm <- VRM(dem_cropped, w = c(3, 3))
+    # Calculate the specific catchment area (SCA)
+    flowdir <- terrain(dem_cropped, "flowdir")
+    weight<- cellSize(dem_cropped,transform=FALSE,unit="m")
+
+    #The algorithm is an adaptation of the one proposed by Zhou at al, 2019.
+    # Calculate flow accumulation (which is equivalent to Specific Catchment Area)
+    flow_accumulation <- flowdir * weight
+    file_name ='workingdem.tif'
+    writeRaster(dem_cropped, file_name,  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+    # Step 2: Fill depressions in the DEM using WhiteboxTools
+    wbt_fill_depressions("./workingdem.tif", "./filled_dem.tif")
+
+    wbt_slope("./filled_dem.tif",  "./working_slope.tif", 
+  zfactor = 1.0,  # Adjust if the DEM is in geographic coordinates
+  units = "degrees"  # You can also specify "radians" if needed
+)
+ 
+    # Step 3: Calculate D8 flow accumulation
+    wbt_d8_flow_accumulation("./filled_dem.tif", "./flow_accumulation.tif", out_type = "cells")
+ slp <- rast("./working_slope.tif")
+   # Load the flow accumulation (SCA) raster
+   sca <- rast("./flow_accumulation.tif")
+
+
+
+    # Calculate TWI
+    # Step 4: Calculate TWI using the SCA and slope
+    twi <- log(sca / tan(slp))
+   
+    # Handle infinite values
+    twi[is.infinite(twi)] <- NA
+
+    # Calculate profile curvature with a specified window size
+    # Calculate profile curvature with a specified window size
+    profile_curv <- Qfit(dem_cropped, metrics = c("profc"), w = c(3, 3))
+    plan_curv <- Qfit(dem_cropped, metrics = c("planc"), w = c(3, 3))
+    #plot(dem)
+    
+    # Combine DEM, slope, and aspect into one multi-layer raster
+    combined_raster <- c(dem_cropped, slope,profile_curv,plan_curv,
+                         sca,twi,roughness,tpi,vrm)
+
+    names(combined_raster) <- c( "elevation",  "slope"         ,    "profc"        ,     "planc"  ,
+ "flow_acc","twi", "roughness"      ,   "TPI"       ,        "vrm"  )
+      
+    # Save DEM as a GeoTIFF file
+    file_name <- paste0(datapath,"/terr_stack", huc8_name, ".tif")
+    writeRaster(combined_raster, file_name,  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+    message(paste("DEM downloaded and saved for HUC8:", huc8_id," with ", huc8_name))
+  }, error = function(e) {
+    message(paste("Error downloading DEM for HUC8:", huc8_id, " - ", e))
+  })
+}
+
+# Loop through all HUC8 regions in Washington and download DEMs
+for (i in 1:nrow(huc8_regions[1])) {
+#for (i in 1:1) {
+  huc8_boundary <- huc8_regions[i, ]
+  huc8_id <- huc8_regions$huc8[i]
+   huc8_name <- huc8_regions$name[i]
+  
+  # Download DEM for each HUC8
+  download_huc8_dem_name(huc8_boundary, huc8_id,huc8_name)
+}
+```
+
+## Expected Outputs
+
+Input DEM files in the /data/WA_10m directory.
+Multi-layer GeoTIFF files with terrain attributes.
+Logs of any errors encountered during processing.
+
+## Tips and Troubleshooting
+
+Ensure all packages are installed and up-to-date.
+Check file paths and permissions if data is not saving correctly.
+Review WhiteboxTools logs for specific tool errors.
+
