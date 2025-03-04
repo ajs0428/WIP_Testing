@@ -10,13 +10,9 @@ editor: visual
 
 This notebook provides a detailed guide for processing 10-meter resolution Digital Elevation Models (DEMs) for Washington State (WA) using R. Includes downloading, cropping, and generating terrain metrics such as slope, roughness, and Topographic Wetness Index (TWI) for HUC8 watersheds.
 
-#@@ Objectives
+\#\@\@ Objectives
 
-Clip and process DEM data for HUC8 regions in WA.
-Calculate terrain attributes including slope, roughness, TWI, and curvature.
-Automate the processing of all HUC8 watersheds in the state.
-
-
+Clip and process DEM data for HUC8 regions in WA. Calculate terrain attributes including slope, roughness, TWI, and curvature. Automate the processing of all HUC8 watersheds in the state.
 
 ## Load packages
 
@@ -44,8 +40,7 @@ load('./fun.RData')
 
 ## Load and Prepare Shapefiles
 
-wa_shapes: Washington state boundary shapes.
-wa_huc8s: Hydrological Unit Code 8 (HUC8) watershed boundaries.
+wa_shapes: Washington state boundary shapes. wa_huc8s: Hydrological Unit Code 8 (HUC8) watershed boundaries.
 
 ```{r}
 wa_shapes <- vect("data/wa_shp_diss.gpkg")
@@ -55,8 +50,8 @@ wa_huc8s$name
 
 ## Data Processing Workflow
 
-- Prepare Boundary Data
-- Obtain HUC8 Boundaries
+-   Prepare Boundary Data
+-   Obtain HUC8 Boundaries
 
 ```{r}
 library(sf)
@@ -84,11 +79,7 @@ terr_stackXXX XXXX is the name of the basin
 
 Key tasks:
 
--DEM Cropping and Masking: Crops DEM to the watershed boundary.
--Terrain Metric Calculations: Slope, roughness, curvature, TWI.
--WhiteboxTools Integration: Filling depressions, flow accumulation.
--Saving Outputs: Exports combined rasters as GeoTIFF files.
-
+-DEM Cropping and Masking: Crops DEM to the watershed boundary. -Terrain Metric Calculations: Slope, roughness, curvature, TWI. -WhiteboxTools Integration: Filling depressions, flow accumulation. -Saving Outputs: Exports combined rasters as GeoTIFF files.
 
 ```{r}
 
@@ -183,13 +174,8 @@ for (i in 1:nrow(huc8_regions[1])) {
 
 ## Expected Outputs
 
-Input DEM files in the /data/WA_10m directory.
-Multi-layer GeoTIFF files with terrain attributes.
-Logs of any errors encountered during processing.
+Input DEM files in the /data/WA_10m directory. Multi-layer GeoTIFF files with terrain attributes. Logs of any errors encountered during processing.
 
 ## Tips and Troubleshooting
 
-Ensure all packages are installed and up-to-date.
-Check file paths and permissions if data is not saving correctly.
-Review WhiteboxTools logs for specific tool errors.
-
+Ensure all packages are installed and up-to-date. Check file paths and permissions if data is not saving correctly. Review WhiteboxTools logs for specific tool errors.
