@@ -1,0 +1,411 @@
+---
+title: "WA_WIP_10m"
+description: "Creates 10m WIP output for WA State"
+author: "Aji John"
+format: html
+editor: visual
+---
+
+## WA WIP
+
+## Load libraries
+
+```{r}
+library(terra)
+library(tidyterra)
+library(stringr)
+library(dplyr)
+library(randomForest)
+library(caret)
+library(ggplot2)
+library(lme4)
+set.seed(11)
+```
+
+## Load HUC-8 Watershed Data
+
+
+```{r}
+wa_shp <- vect("data/wa_shp_diss.gpkg")  # Load Washington state shapefile
+wa_hucs <- vect("data/Hydrography/WA_HUC8.gpkg") # Load HUC-8 boundaries
+wa_hucs$name # Display the names of HUC-8 regions
+```
+
+## Set Data Path
+
+```{r}
+datapath <- paste0(getwd(), "/data/WA_10m")
+datapath
+```
+
+## List Rasters and Points
+```{r}
+# Retrieve list of raster files matching the pattern 'Skykomish'
+list_rasts <- as.list(list.files(path = datapath, 
+                                 full.names = TRUE, 
+                                 pattern = "Skykomish",
+                                 include.dirs = FALSE))
+list_rasts
+
+# Retrieve list of point files matching the same pattern
+list_pts <- as.list(list.files(path = paste0(datapath, "/points"), 
+                               full.names = TRUE, 
+                               pattern = "Skykomish",
+                               include.dirs = FALSE))
+list_pts
+```
+
+## Select 'terra' Raster stacks
+
+```{r}
+# Extract the first raster containing 'terr' in its name
+terr_rast <- (list_rasts[grep('terr', (list_rasts))])[[1]]
+(terr_rast)
+
+# Display the variable name as a string
+deparse(substitute(terr_rast))
+```
+
+## Define Random Forest function to calculate WIP
+
+```{r}
+wip_rf_func <- function(hucs, path) {
+    for(i in 1:length(hucs)){
+        nameClean <- str_replace_all(paste0(values(hucs[i])), "[^[:alnum:]]", "")
+        rasts <- as.list(list.files(path = path, 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+
+        pts <- as.list(list.files(path = paste0(path, "/points"), 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+      
+        training_pts <- vect(pts[[1]])
+        terr_rast <- rast((rasts[grep('terr', (rasts))])[[1]])
+        spec_rast <- rast((rasts[grep('spec', (rasts))])[[1]])
+        clim_rast <- rast((rasts[grep('clim', (rasts))])[[1]])
+
+        # Extract values from rasters to points and create a dataframe
+        pts_ext <-  training_pts |>
+                terra::extract(x = terr_rast, bind = T) |> 
+                terra::extract(x = spec_rast, bind = T) |> 
+                terra::extract(x = clim_rast, bind = T) |> 
+                as.data.frame() |> 
+                dplyr::mutate(class = as.factor(class)) |>
+                na.exclude() |>
+                write.csv(paste0(path, "/RF_Models/", 
+                                 nameClean, "rf_df", ".csv"))
+
+        # Read and prepare training data
+        pts_ext <- read.csv(paste0(path, "/RF_Models/", 
+                                 nameClean, "rf_df", ".csv"),
+                            stringsAsFactors = T) |>
+                    select(-X)
+
+        # Split data into training and test sets
+        train.index <- as.vector(sample(c(1:nrow(pts_ext)), 0.7*nrow(pts_ext), replace=F))
+        train <- pts_ext[train.index, ]
+        test <- pts_ext[-train.index, ]
+
+        # Build Random Forest Model
+        rf_model <- randomForest(as.factor(class) ~ ., mtry = 10, 
+                         sampsize = nrow(train[train$class == "WET",]),
+                         replace = TRUE, 
+                         nodesize =1,
+                         ntree = 1000, na.action = na.omit,
+                         importance = TRUE, data = train)
+
+        # Evaluate model with confusion matrix
+        test_predict <- predict(rf_model, newdata = test, type = "response") 
+        cm <- caret::confusionMatrix(test_predict, as.factor(test$class))
+        cmtocsv <- data.frame(cbind(t(cm$overall),t(cm$byClass)))
+        write.csv(cmtocsv,file=paste0(path, "/RF_Models/",
+                                          nameClean, "rf_model_testCM", ".csv"))
+        save(rf_model, file = paste0(path, "/RF_Models/",
+                                          nameClean, "rf_model", ".RData"))
+    }
+}
+```
+
+## Run the Function for All HUCs
+
+```{r}
+wip_rf_func(wa_hucs, datapath)
+```
+
+## Test the Model for Willipa Bay 
+
+```{r}
+test <- get(load("data/WA_10m/RF_Models/WillapaBayrf_model.RData"))
+test$importance
+```
+
+## Visualize the accuracy results for each model
+
+```{r}
+list_testacc <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
+                                 full.names = TRUE, 
+                                 pattern = "CM.csv",
+                                 include.dirs = FALSE))
+
+list_testacc
+empty <- list()
+for(i in 1:length(list_testacc)){
+    csv <- read.csv(list_testacc[[i]])
+    csv$X <- substr(list_testacc[[i]], 51, 60)
+    empty[[i]] <- csv
+}
+
+testacc <- bind_rows(empty)
+testacc
+```
+
+## Plot Accuracy Metrics
+
+```{r}
+testacc %>% mutate(rid = row_number()) %>%
+  ggplot() + 
+  #geom_boxplot(aes(x=Accuracy)) +
+ geom_line(aes(rid,Accuracy,color='Acc'))  +
+ geom_line(aes(rid,F1,color='F1'))  +  
+   geom_line(aes(rid,Recall,color='Recall'))  +  
+   geom_line(aes(rid,Precision,color='Precision'))  +  
+  theme_minimal()
+```
+
+Now we can try to generate a prediction in one of the watersheds To do this we need a raster stack of the covariates in the same resolution and projection. Preferably in the resolution of the DEM used to make terrain metrics
+
+## Display Names of HUC-8 Regions
+
+```{r}
+wa_hucs$name
+```
+
+## Validate for Hoh - filter and list Prediction rasters for one Huc
+```{r}
+wa_hucs$name[wa_hucs$name == "Hoh-Quillayute"]
+pred_rasts <- as.list(list.files(path = datapath, 
+                                     full.names = TRUE, 
+                                     #pattern = str_replace_all(paste0(values("Hoh")), "[^[:alnum:]]", ""),
+                                     pattern = gsub(" ", "", paste0("Hoh")),
+                                     include.dirs = FALSE))
+pred_rasts
+```
+
+## Load and Resample Prediction Rasters
+```{r}
+pred_terr <- rast((pred_rasts[grep('terr', (pred_rasts))])[[1]])
+pred_spec <- rast((pred_rasts[grep('spec', (pred_rasts))])[[1]]) |> resample(pred_terr)
+pred_clim <- rast((pred_rasts[grep('clim', (pred_rasts))])[[1]]) |> resample(pred_terr)
+
+
+pred_terr
+pred_spec
+```
+
+## Create a Multi-Layer Raster Stack
+```{r}
+pred_stack <- c(pred_terr, pred_spec, pred_clim)
+names(pred_stack)
+```
+
+## Load Prediction Model and Display Variable Importance for Hoh
+```{r}
+list_models <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
+                                 full.names = TRUE, 
+                                 pattern = "HohQuillayuterf_model",
+                                 include.dirs = FALSE))
+#list_models
+read.csv(list_models[[1]])
+pred_model <- get(load(list_models[[2]]))
+vip::vip(pred_model, num_features = 15)
+
+```
+## Aggregate Variable Importance Across Models
+
+```{r}
+lm <- as.list(list.files(path = paste0(datapath, "/RF_Models"), 
+                                 full.names = TRUE, 
+                                 pattern = "RData",
+                                 include.dirs = FALSE))
+rb<- data.frame()
+
+for (model in lm)
+{
+   pm <- get(load(model))
+   dfimp <- pm$importance %>% as.data.frame()
+   rb <- rbind(rb,dfimp)
+}  
+```
+
+## Cumulative importance
+
+```{r}
+#rb %>% summarise(mp = )
+```
+
+## Generate Prediction and Save Outputfor Hoh
+```{r}
+pred_wip <- predict(pred_stack, pred_model, type = "prob", 
+                    filename = "data/10m_huc_data/WIPs/HohQuillayute_WIP.tif", 
+                    overwrite = TRUE)
+```
+
+## Visualize the Prediction Map for Hoh
+```{r}
+plot(pred_wip[[2]], ext = ext(vect("data/10m_huc_data/points/HohQuillayute_pts.gpkg")))
+```
+
+# Clip Hoh area and Plot
+
+```{r}
+hoh_cc <- vect("data/HOH_POLYGON_711.gpkg") |> terra::project("EPSG:3740")
+
+hoh_30m <- crop(pred_wip, hoh_cc, mask = TRUE)
+hoh_30m
+
+ggplot() + 
+    geom_spatraster(data = hoh_30m[[2]])
+```
+
+## Putting together an iterative prediction mapping function 
+
+
+```{r}
+wip_map_func <- function(hucs, path) {
+    for(i in 1:length(hucs)){
+        nameClean <- str_replace_all(paste0(values(hucs[i])), "[^[:alnum:]]", "")
+        
+        # Retrieve relevant files
+        rasts <- as.list(list.files(path = path, 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+        pts <- as.list(list.files(path = paste0(path, "/points"), 
+                                     full.names = TRUE, 
+                                     pattern = nameClean,
+                                     include.dirs = FALSE))
+        
+        mod <- get(load(as.list(list.files(path = paste0(path, "/RF_Models"), 
+                                     full.names = TRUE, 
+                                     pattern = paste0(nameClean, "rf_model.RData"),
+                                     include.dirs = FALSE))[[1]]))
+      
+        # Load and resample rasters
+        terr_rast <- rast((rasts[grep('terr', (rasts))])[[1]])
+        spec_rast <- rast((rasts[grep('spec', (rasts))])[[1]]) |> resample(terr_rast)
+        clim_rast <- rast((rasts[grep('clim', (rasts))])[[1]]) |> resample(terr_rast)
+
+        pred_stack <- c(terr_rast, spec_rast, clim_rast)
+
+        # Generate and save the prediction raster
+        pred_wip <- predict(pred_stack, mod, type = "prob", 
+                    filename = paste0(path, "/WIPs/", nameClean, "_WIP.tif"), 
+                    overwrite = TRUE)
+        }
+}
+```
+
+# Apply the Mapping Function to All HUCs 
+
+Creates WIP predictions  for all the HUCs
+
+```{r}
+wip_map_func(wa_hucs, datapath)
+```
+
+## Create a Mosaic of Prediction Rasters
+```{r}
+list_wips <- as.list(list.files(path = paste0(datapath, "/WIPs"), 
+                                 full.names = TRUE, 
+                                 pattern = "_WIP.tif",
+                                 include.dirs = FALSE))
+list_wips_r <- lapply(list_wips, rast)
+sprc_wips_r <- terra::sprc(list_wips_r)
+```
+
+```{r}
+wa_wip <- terra::mosaic(sprc_wips_r, 
+                        fun = "mean", 
+                        filename = "data/WIP_Maps/WA_WIP_10m_Dan.tif")
+                        
+```
+
+```{r}
+r<- rast('./data/WIP_Maps/WA_WIP_10m_Dan.tif')
+plot(r)
+```
+
+## Smoothing routine 
+
+- focal(): Applies a moving window to smooth the raster.
+- writeRaster(): Saves the smoothed raster with compression.
+	
+
+```{r}
+
+# Define a focal window (3x3, for example)
+window <- matrix(1, nrow = 7, ncol = 7)
+
+# Iterate over the list using a for loop
+for (item in list_wips) {
+  fone <- item
+  rr <- rast(fone)
+  # Use focal mean to fill gaps (na.rm = TRUE to ignore NAs when calculating mean)
+  raster_filled <- focal(rr, w = window, fun = mean, na.rm = TRUE, fillvalue = NA)
+  # Assuming 'raster' is your SpatRaster object
+# Create a new raster template with a 25m resolution
+raster_template <- rast(ext(raster_filled), resolution = 10, crs = crs(raster_filled))
+
+# Resample the original raster to the new 25m resolution
+raster_resampled <- resample(raster_filled, raster_template, method = "near")  # You can use "near" for nearest neighbor if categorical
+
+# Extract the filename
+file_name <- basename(fone)
+
+writeRaster(raster_filled, paste0(datapath, "/WIPsSmoothed/",file_name),  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+
+}
+
+
+```
+
+## Smoothing and Resampling
+```{r}
+
+list_wips <- as.list(list.files(path = paste0(datapath, "/WIPsSmoothed"), 
+                                 full.names = TRUE, 
+                                 pattern = "_WIP.tif",
+                                 include.dirs = FALSE))
+list_wips_r <- lapply(list_wips, rast)
+sprc_wips_r <- terra::sprc(list_wips_r)
+```
+
+```{r}
+wa_wip <- terra::mosaic(sprc_wips_r, 
+                        fun = "mean", 
+                        filename = "data/WIP_Maps/WA_WIP_10m_DD.tif",overwrite=TRUE)
+                        
+```
+
+## Final Compression of the Mosaic
+
+```{r}
+library(terra)
+list_wips <- as.list(list.files(path = paste0(datapath, "/WIPsSmoothed"), 
+                                 full.names = TRUE, 
+                                 pattern = "_WIP.tif",
+                                 include.dirs = FALSE))
+list_wips_r <- lapply(list_wips, rast)
+sprc_wips_r <- terra::sprc(list_wips_r)
+```
+
+```{r}
+wa_wip <- terra::mosaic(sprc_wips_r, 
+                        fun = "median", 
+                        gdal = c("COMPRESS=DEFLATE"),
+                        filename = "data/WIP_Maps/WA_WIP_10m_DD_compressed.tif",overwrite=TRUE)
+                        
+```

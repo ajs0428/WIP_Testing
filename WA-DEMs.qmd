@@ -1,0 +1,128 @@
+---
+title: "WA_DEMs"
+description: "Approx 40m"
+format: html
+editor: visual
+---
+
+## Quarto
+
+
+
+## Running Code
+
+
+
+```{r}
+library(terra)
+library(tidyterra)
+library(stringr)
+library(dplyr)
+library(randomForest)
+library(caret)
+library(ggplot2)
+library(lme4)
+set.seed(11)
+library(elevatr)  
+library(nhdplusTools)
+```
+
+You can add options to executable code like this
+```{r}
+wa_shapes <- vect("data/wa_shp_diss.gpkg")
+wa_huc8s <- vect("data/Hydrography/WA_HUC8.gpkg")
+wa_huc8s$name
+```
+
+```{r}
+library(sf)
+library(tigris) 
+# Get Washington state boundary
+wa_boundary <- states(cb = TRUE) %>% 
+  filter(STUSPS == "WA") %>% 
+  st_transform(crs = 4326)  # Ensure it's in WGS84 CRS
+
+# Get all HUC8 boundaries that intersect Washington State
+huc8_regions <- get_huc(AOI = wa_boundary, type = "huc08")
+```
+```{r}
+datapath <- paste0(getwd(), "/data/huc_data")
+```
+
+```{r}
+# Function to download DEM for a single HUC8 region
+download_huc8_dem <- function(huc8_boundary, huc8_id, zoom_level = 10) {
+  tryCatch({
+    # Download DEM using elevatr
+    dem <- get_elev_raster(locations = huc8_boundary, z = zoom_level, clip = "locations")
+    
+    # Save DEM as a GeoTIFF file
+    file_name <- paste0("WA_HUC8_DEM_", huc8_id, ".tif")
+    writeRaster(dem, file_name, format = "GTiff")
+    message(paste("DEM downloaded and saved for HUC8:", huc8_id))
+  }, error = function(e) {
+    message(paste("Error downloading DEM for HUC8:", huc8_id, " - ", e))
+  })
+}
+
+# Loop through all HUC8 regions in Washington and download DEMs
+for (i in 1:nrow(huc8_regions[1])) {
+  huc8_boundary <- huc8_regions[i, ]
+  huc8_id <- huc8_regions$huc8[i]
+  
+  # Download DEM for each HUC8
+  download_huc8_dem(huc8_boundary, huc8_id)
+}
+```
+```{r}
+# Assuming you already have WA HUC8 and county data
+# Load or fetch the county boundaries (e.g., using tigris)
+wa_counties <- counties(state = "WA", cb = TRUE) %>% 
+  st_transform(crs = 4326)
+
+# Assuming wa_huc8 is your HUC8 boundaries for Washington State
+# Perform a spatial join to intersect HUC8 with counties
+huc8_county_intersection <- st_intersection(huc8_regions, wa_counties)
+
+# Inspect the result
+head(huc8_county_intersection)
+```
+
+
+```{r}
+library(whitebox)
+
+# set up as needed
+wbt_init()
+```
+
+
+```{r}
+
+# Step 1: Load DEM using terra
+dem <- rast("WA_HUC8_DEM_17080005.tif")
+
+# Step 2: Fill depressions in the DEM using WhiteboxTools
+wbt_fill_depressions("./WA_HUC8_DEM_17080005.tif", "./filled_dem.tif")
+
+# Step 3: Calculate D8 flow accumulation
+wbt_d8_flow_accumulation("./filled_dem.tif", "./flow_accumulation.tif", out_type = "cells")
+
+# Step 4: Reclassify flow accumulation to identify water bodies using a threshold of 1000
+wbt_reclass(
+  input = "./flow_accumulation.tif",
+  output = "./water_bodies.tif",
+  reclass_vals = "1000;999999;1;0;1000;0"
+)
+
+
+# Step 5: Calculate Euclidean distance from water bodies
+wbt_euclidean_distance("./water_bodies.tif", "./distance_to_water.tif")
+
+# Step 6: Calculate depth to water by subtracting water bodies from DEM
+wbt_subtract("./WA_HUC8_DEM_17080005.tif", "./water_bodies.tif", "./depth_to_water.tif")
+
+# Step 7: Load and plot the depth to water raster using terra
+depth_to_water <- rast("depth_to_water.tif")
+plot(depth_to_water)
+```

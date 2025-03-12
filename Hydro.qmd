@@ -4,9 +4,12 @@ format: html
 editor: visual
 ---
 
-## Quarto
+## To do
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+Anthony Aji (30m) Status Needed DEM at elevation Using Elevator - pulling from open topography - Terra or could use whitebox Elevation wa_dev2 slope To do - Works fine - Terra package Slope (at 3 scales) wa_dev3 profc To do - Works fine. - Multiscale DTM, (Kai’s code) Surface metrics code did not work - exhausted memory Profc (at 3 scales) wa_dev8 planc To do - Works fine. - Multiscale DTM, (Kai’s code) Surface metrics code did not work - exhausted memory Planc (at 3 scales) wa_dinf flow_acc Done - whitebox. Slope fed in from Terra. TWI wa_plan twi Done - Terra package VRM (Ruggedness) wa_prof roughness\
+Done - Terra package TPI/Dev (at 3 scales) wa_rugg TPI Testing out the whitebox tools for one watershed. DTW wa_slop vrm
+
+wa_twi
 
 ## Running Code
 
@@ -17,11 +20,12 @@ library(terra)
 library(sf)
 library(MultiscaleDTM)
 library(here)
+library(whitebox)
 ```
 
 originl crs - coord. ref. : NAD83 / UTM zone 10N (EPSG:26910)
 
-transform to 3740  - NAD83(HARN) / UTM zone 10N (EPSG:3740)
+transform to 3740 - NAD83(HARN) / UTM zone 10N (EPSG:3740)
 
 ```{r}
 finescaledem <- rast("~/Documents/Qgis/teal/Hoh_data/DEM_Input/Hoh_all_DTM_NAD83_4m_v2_clip.tif")  %>% terra::project("EPSG:3740")
@@ -32,13 +36,97 @@ Save it by compressing
 
 # Calculate Slope, at different negihbourhoods
 
+MultiScale (Prof/Plan/Slope/TPI) 30 m - 3 by 3, 9 by 9, and 17 by 17
+
 ```{r}
-slope <- terrain(finescaledem, v = "slope", neighbors = 8)
-writeRaster(slope, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+slope4 <- terrain(finescaledem, v = "slope", neighbors = 4)
+writeRaster(slope4, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope4.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+unlink(slope4)
+
+slope8 <- terrain(finescaledem, v = "slope", neighbors = 8)
+writeRaster(slope8, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope8.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+unlink(slope8)
+
+
+# Define focal window for smoothing (9x9 window)
+w_9x9 <- matrix(1, nrow = 9, ncol = 9)
+# Apply focal to smooth the DEM with 9x9 window
+smoothed_dem_9x9 <- focal(finescaledem, w = w_9x9, fun = mean)
+# Calculate slope on the smoothed DEM (9x9 window)
+slope_9x9 <- terrain(smoothed_dem_9x9, v = "slope", unit = "degrees")
+writeRaster(slope_9x9, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope9.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+unlink(slope_9x9)
+
+
+# Define focal window for smoothing (17x17 window)
+w_17x17 <- matrix(1, nrow = 17, ncol = 17)
+# Apply focal to smooth the DEM with 17x17 window
+smoothed_dem_17x17 <- focal(finescaledem, w = w_17x17, fun = mean)
+# Calculate slope on the smoothed DEM (17x17 window)
+slope_17x17 <- terrain(smoothed_dem_17x17, v = "slope", unit = "degrees")
+writeRaster(slope_17x17, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope17.tif",  gdal=c("COMPRESS=LZW"),overwrite=TRUE)
+unlink(slope_17x17)
+
+
 # Save or plot the result
 plot(slope, main = "Slope")
 ```
 
+```{r}
+library(terra)
+library(whitebox)
+
+slp9 <- rast('~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope9.tif')
+plot(slp9)
+
+slp17 <- rast('~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-slope17.tif')
+plot(slp17)
+```
+
+# Do depth to water
+
+```{r}
+library(terra)
+library(whitebox)
+# Step 1: Load DEM using terra
+dem <- rast("~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-3740crs.tif")
+
+# Step 2: Fill depressions in the DEM using WhiteboxTools
+wbt_fill_depressions("~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-3740crs.tif", "./filled_dem.tif")
+
+# Step 3: Calculate D8 flow accumulation
+wbt_d8_flow_accumulation("./filled_dem.tif", "./flow_accumulation.tif", out_type = "cells")
+wbt_d_inf_flow_accumulation("./filled_dem.tif", "./flow_accumulationdinf.tif")
+
+flaccdinf <- rast("./flow_accumulationdinf.tif")
+plot(flaccdinf)
+
+flacc <- rast("./flow_accumulation.tif")
+plot(flacc)
+
+# Step 4: Reclassify flow accumulation to identify water bodies using a threshold of 1000
+#	Threshold of 1000: Flow accumulation values >= 1000 are reclassified as 1 (water bodies).
+#	Flow accumulation values < 1000 are reclassified as 0 (non-water bodies).
+
+wbt_reclass(
+  input = "./flow_accumulation.tif",
+  output = "./water_bodies.tif",
+  reclass_vals = "200000000;9200000000;1;0;200000000;0"
+)
+
+wb <- rast("./water_bodies.tif")
+plot(wb)
+
+# Step 5: Calculate Euclidean distance from water bodies
+wbt_euclidean_distance("./water_bodies.tif", "./distance_to_water.tif")
+
+# Step 6: Calculate depth to water by subtracting water bodies from DEM
+wbt_subtract("~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-3740crs.tif", "./water_bodies.tif", "./depth_to_water.tif")
+
+# Step 7: Load and plot the depth to water raster using terra
+depth_to_water <- rast("depth_to_water.tif")
+plot(depth_to_water)
+```
 
 # Calculate Aspect, at different negihbourhoods
 
@@ -50,6 +138,7 @@ plot(aspect, main = "Aspect")
 ```
 
 # Calculate Profile curvature using Terra
+
 ```{r}
 # Define Sobel filters for x and y direction gradients
 sobel_x <- matrix(c(-1, 0, 1, -2, 0, 2, -1, 0, 1), nrow = 3, byrow = TRUE)
@@ -85,12 +174,28 @@ plot(TPI, main = "TPI")
 
 # Profile curvature using R Multiscale
 
+MultiScale (Prof/Plan/Slope/TPI) 30 m - 3 by 3, 9 by 9, and 17 by 17
+
 ```{r}
 # Set the window size (e.g., 3x3)
 window_size <- 3
 
 # Calculate profile curvature with a specified window size
-profile_curv <- Qfit(finescaledem, metrics = c("profc"), w = c(3, 3))
+profile_curv_3 <- Qfit(finescaledem, metrics = c("profc"), w = c(3, 3))
+# Calculate profile curvature with a specified window size
+profile_curv_9 <- Qfit(finescaledem, metrics = c("profc"), w = c(9, 9))
+# Calculate profile curvature with a specified window size
+profile_curv_17 <- Qfit(finescaledem, metrics = c("profc"), w = c(17, 17))
+
+writeRaster(profile_curv_3, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-profc3.tif",  gdal=c("COMPRESS=LZW"))
+unlink(profile_curv_3)
+
+writeRaster(profile_curv_9, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-profc9.tif",  gdal=c("COMPRESS=LZW"))
+unlink(profile_curv_9)
+
+writeRaster(profile_curv_17, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-profc17.tif",  gdal=c("COMPRESS=LZW"))
+unlink(profile_curv_17)
+
 writeRaster(profile_curv, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-profc.tif",  gdal=c("COMPRESS=LZW"))
 # Plot the result
 plot(profile_curv, main = paste("Profile Curvature (Window Size:", window_size, "x", window_size, ")"))
@@ -103,28 +208,41 @@ plot(profile_curv, main = paste("Profile Curvature (Window Size:", window_size, 
 window_size <- 3
 
 # Calculate plan curvature with a specified window size
-plan_curv <- Qfit(finescaledem, metrics = c("planc"), w = c(3, 3))
-writeRaster(plan_curv, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-planc.tif",  gdal=c("COMPRESS=LZW"))
+plan_curv3 <- Qfit(finescaledem, metrics = c("planc"), w = c(3, 3))
+writeRaster(plan_curv3, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-planc3.tif",  gdal=c("COMPRESS=LZW"))
+unlink(plan_curv3)
+
+# Calculate plan curvature with a specified window size
+plan_curv9 <- Qfit(finescaledem, metrics = c("planc"), w = c(9, 9))
+writeRaster(plan_curv9, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-planc9.tif",  gdal=c("COMPRESS=LZW"))
+unlink(plan_curv9)
+
+# Calculate plan curvature with a specified window size
+plan_curv17 <- Qfit(finescaledem, metrics = c("planc"), w = c(17, 17))
+writeRaster(plan_curv17, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-planc17.tif",  gdal=c("COMPRESS=LZW"))
+unlink(plan_curv17)
+
 # Plot the result
 plot(plan_curv, main = paste("Plan Curvature (Window Size:", window_size, "x", window_size, ")"))
 ```
 
-
 # Plan curvature using R
-	•	Low TWI Values (0 - 6):
-	•	Indicate areas that are likely to be drier.
-	•	Found on ridges, steep slopes, and areas with minimal water accumulation.
-	•	Associated with well-drained soils and lower soil moisture.
-	•	Moderate TWI Values (6 - 10):
-	•	Represent areas with moderate potential for water accumulation.
-	•	Typically found on gentle slopes or in transition zones between ridges and valleys.
-	•	These areas may have moderate soil moisture levels.
-	•	High TWI Values (10 and above):
-	•	Indicate areas likely to be wetter.
-	•	Found in valleys, depressions, or flat areas where water accumulates.
-	•	Associated with poorly drained soils, high soil moisture, and potential wetland areas.
-	
-	
+
+```         
+•   Low TWI Values (0 - 6):
+•   Indicate areas that are likely to be drier.
+•   Found on ridges, steep slopes, and areas with minimal water accumulation.
+•   Associated with well-drained soils and lower soil moisture.
+•   Moderate TWI Values (6 - 10):
+•   Represent areas with moderate potential for water accumulation.
+•   Typically found on gentle slopes or in transition zones between ridges and valleys.
+•   These areas may have moderate soil moisture levels.
+•   High TWI Values (10 and above):
+•   Indicate areas likely to be wetter.
+•   Found in valleys, depressions, or flat areas where water accumulates.
+•   Associated with poorly drained soils, high soil moisture, and potential wetland areas.
+```
+
 ```{r}
 finescaledem <- rast("~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-3740crs.tif")
 
@@ -153,7 +271,6 @@ twi <- log(flow_accumulation / tan(slope))
 # Save or plot the result
 plot(twi, main = "Topographic Wetness Index (TWI)")
 ```
-
 
 ```{r}
 

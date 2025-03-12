@@ -1,5 +1,5 @@
 ---
-title: "WIP-Prabability-Hoh"
+title: "WIP-Prabability-Hoh 10m"
 format: html
 editor: visual
 ---
@@ -94,13 +94,40 @@ writeRaster(hydro_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/HydroHoh-stacke
 names(hydro_stack) <- file_names[2:3]
 ```
 
+# get Spectral
+
+```{r}
+list_files <- list.files(path = "~/Documents/Qgis/teal/Hoh_data/VegIndices", full.names = TRUE, pattern = ".tif$", include.dirs = FALSE)
+list_files
+
+# Initialize an empty vector to store filenames
+file_names <- c()
+
+# Load rasters and check extents
+for (file in list_files) {
+  r <- rast(file)
+  print(file)
+  print(ext(r))
+  file_name <- tools::file_path_sans_ext(basename(file))
+  file_names <- append(file_names, file_name)
+}
+spectral_stack<- rast(list_files[7:9]) %>% terra::project("EPSG:3740")
+
+writeRaster(spectral_stack, "~/Documents/Qgis/teal/Hoh_data/stacked/SpectralHoh-stacked.tif",   gdal=c("COMPRESS=LZW","TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256"),overwrite=TRUE)
+#terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
+
+names(spectral_stack) <- file_names[7:9]
+```
+
 # Extract points from
 
 ```{r}
 terr_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHoh-stacked.tif")
 hydro_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/HydroHoh-stacked.tif")
+spectral_stack <- terra::rast( "~/Documents/Qgis/teal/Hoh_data/stacked/SpectralHoh-stacked.tif")
 
-all_stack <- c(terr_stack,hydro_stack)
+spectral_stack_prj <- terra::resample(spectral_stack,hydro_stack)
+all_stack <- c(terr_stack,hydro_stack,spectral_stack_prj)
 
 pts_extract <- pts |> terra::extract(x = all_stack, bind = TRUE, xy = TRUE) 
 ```
@@ -152,12 +179,12 @@ rf.test <- predict(rf_model, newdata = test, type = "prob")
 # Predict on the Hoh, prediction takes longer for the entire Hoh
 
 ```{r}
-pred_wip_prob <- predict(all_stack, rf_model, fun = predict, type = "prob")
+pred_wip_topohydrospectral_prob <- predict(all_stack, rf_model, fun = predict, type = "prob")
 # Save the predicted raster
-writeRaster(pred_wip_prob, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHydroHoh-predicted-wip-prob.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
+writeRaster(pred_wip_topohydrospectral_prob, "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHydroSpectralHoh-predicted-wip-prob.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
 
 # Plot the predicted raster
-plot(pred_wip_prob, main = "Predicted WIP-Hydro+TopoProbability")
+plot(pred_wip_topohydrospectral_prob, main = "Predicted WIP-Hydro+Topo-Spectral-Probability")
 
 ```
 
@@ -170,13 +197,13 @@ plot(pred_wip_prob, main = "Predicted WIP-Hydro+TopoProbability")
 window_size <- 3  # 3x3 window
 
 # Apply a mean filter
-smoothed_raster_prob <- focal(pred_wip_prob, w = matrix(1, nrow = window_size, ncol = window_size), fun = mean, na.rm = TRUE)
+smoothed_pred_wip_topohydrospectral_prob <- focal(pred_wip_topohydrospectral_prob, w = matrix(1, nrow = window_size, ncol = window_size), fun = mean, na.rm = TRUE)
 
 # Save the smoothed raster
-writeRaster(smoothed_raster_prob,  "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHydroHoh-predicted-wip-smoothed-prbability.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
+writeRaster(smoothed_pred_wip_topohydrospectral_prob,  "~/Documents/Qgis/teal/Hoh_data/stacked/TopoHydroSpectralHoh-predicted-wip-smoothed-prbability.tif", gdal=c("COMPRESS=LZW"),overwrite = TRUE)
 
 # Plot the predicted raster
-plot(smoothed_raster_prob, main = "Predicted WIP- Smoothed-Hydro+Topo")
+plot(smoothed_pred_wip_topohydrospectral_prob, main = "Predicted WIP- Smoothed-Hydro+TopoSpectral")
 ```
 
 ```{r}
@@ -184,11 +211,11 @@ plot(smoothed_raster_prob, main = "Predicted WIP- Smoothed-Hydro+Topo")
 par(mfrow = c(1, 2))
 
 # Plot the first raster with a color palette
-plot(pred_wip_prob, main = "WIP", col = terrain.colors(10))
+plot(pred_wip_topohydrospectral_prob, main = "WIP - Hydro Topo Spectral", col = terrain.colors(10))
 
 # Plot the second raster with a color palette and custom zlim (for WIP Probability)
 #plot(smoothed_raster, main = "Raster 2", col = heat.colors(10), zlim = c(0, 100))
-plot(smoothed_raster_prob, main = "WIP Smoothed", col = terrain.colors(10))
+plot(smoothed_pred_wip_topohydrospectral_prob, main = "WIP Smoothed - Hydro Topo Spectral", col = terrain.colors(10))
 
 # Reset the plotting layout to default
 par(mfrow = c(1, 1))
