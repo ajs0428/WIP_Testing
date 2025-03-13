@@ -2,3 +2,5 @@ data/
 Python/
 WIP_Book/
 .Rproj.user
+*.tif
+*.DS_Store
